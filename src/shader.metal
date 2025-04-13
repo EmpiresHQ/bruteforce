@@ -521,20 +521,9 @@ bool aes_decrypt_cbc(
         }
     }
     
-    
-    // Count several consecutive valid paragraphs as additional validation
-    // Look for multiple newline patterns which indicate text paragraphs
-    uint newline_count = 0;
-    for (uint i = 0; i < search_len - 1; i++) {
-        if ((plaintext[i] == 10 && plaintext[i+1] == 10) ||  // \n\n
-            (plaintext[i] == 13 && plaintext[i+1] == 10 && i+2 < search_len && plaintext[i+2] == 13)) { // \r\n\r
-            newline_count++;
-        }
-    }
-    
     // Return success if the content looks valid
     // Either we found a known pattern or we have enough text structure
-    return found_pattern || (has_text_chars && !has_invalid_chars && newline_count >= 2);
+    return found_pattern;
 }
 
 kernel void decryptAndCheck(
