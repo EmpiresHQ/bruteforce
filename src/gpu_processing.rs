@@ -116,21 +116,21 @@ pub fn start_gpu_thread(found: Arc<AtomicBool>) -> Option<(mpsc::Sender<GpuMessa
             
             println!("Metal pipelines initialized successfully");
             
-            // Prepare buffers
-            let buffer_size = 1024 * 128; // Prepare for max batch size
+            // Prepare buffers - define max batch size for safety
+            let max_batch_size = 1024 * 128; // Prepare for max batch size
             
             // Create buffers
             let buffer_keys = metal_device.new_buffer(
-                (buffer_size * 32) as u64, // 32 bytes per key
+                (max_batch_size * 32) as u64, // 32 bytes per key
                 MTLResourceOptions::StorageModeShared);
             let buffer_ivs = metal_device.new_buffer(
-                (buffer_size * 16) as u64, // 16 bytes per IV
+                (max_batch_size * 16) as u64, // 16 bytes per IV
                 MTLResourceOptions::StorageModeShared);
             let buffer_results = metal_device.new_buffer(
-                (buffer_size * 4) as u64, // 4 bytes per result
+                (max_batch_size * 4) as u64, // 4 bytes per result
                 MTLResourceOptions::StorageModeShared);
             let buffer_candidates = metal_device.new_buffer(
-                (buffer_size * 16) as u64, // 16 bytes per UUID
+                (max_batch_size * 16) as u64, // 16 bytes per UUID
                 MTLResourceOptions::StorageModeShared);
             
             println!("Metal GPU thread ready to process batches");
@@ -143,6 +143,9 @@ pub fn start_gpu_thread(found: Arc<AtomicBool>) -> Option<(mpsc::Sender<GpuMessa
                             break;
                         }
                         
+                        // Safety check: ensure batch_size doesn't exceed max
+                        let batch_size = std::cmp::min(batch_size, max_batch_size);
+                        
                         // Create salt and ciphertext buffers
                         let buffer_salt = metal_device.new_buffer_with_data(
                             salt.as_ptr() as *const _, 
@@ -154,24 +157,34 @@ pub fn start_gpu_thread(found: Arc<AtomicBool>) -> Option<(mpsc::Sender<GpuMessa
                             ciphertext.len() as u64,
                             MTLResourceOptions::StorageModeShared);
                         
-                        // Clear results buffer
+                        // Clear results buffer - with safety bounds check
                         let results_ptr = buffer_results.contents() as *mut u32;
                         unsafe {
+                            // Only clear the portion we're going to use
                             std::ptr::write_bytes(results_ptr, 0, batch_size);
                         }
                         
-                        // Fill candidates buffer - wrapped in a scope to control lifetime
+                        // Fill candidates buffer - wrapped in a scope with safety bounds check
                         {
                             let candidates_ptr = buffer_candidates.contents() as *mut u8;
-                            let candidates_slice = unsafe { std::slice::from_raw_parts_mut(candidates_ptr, batch_size * 16) };
+                            // Create a slice only for the portion we need
+                            let candidates_slice = unsafe { 
+                                std::slice::from_raw_parts_mut(candidates_ptr, batch_size * 16) 
+                            };
                             
                             for i in 0..batch_size {
                                 let candidate = start_candidate + i as u128;
                                 let uuid = candidate_to_uuid(candidate);
                                 let uuid_bytes = uuid.as_bytes();
-                                candidates_slice[i*16..(i+1)*16].copy_from_slice(uuid_bytes);
+                                // Use copy_from_slice only if within bounds
+                                if (i+1)*16 <= candidates_slice.len() {
+                                    candidates_slice[i*16..(i+1)*16].copy_from_slice(uuid_bytes);
+                                }
                             }
                         }
+                        
+                        // Ensure all CPU writes to buffers are complete before GPU access
+                        std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
                         
                         // Compute operations in separate scope
                         {
@@ -220,7 +233,10 @@ pub fn start_gpu_thread(found: Arc<AtomicBool>) -> Option<(mpsc::Sender<GpuMessa
                             command_buffer.wait_until_completed();
                         }
                         
-                        // Check results for matches
+                        // Ensure GPU writes are visible to CPU
+                        std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+                        
+                        // Check results for matches - with safety bounds check
                         let mut found_match = false;
                         {
                             let results_ptr = buffer_results.contents() as *const u32;
