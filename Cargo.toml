@@ -1,0 +1,15 @@
+[package]
+name = "brute"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rayon = "1.7"
+md5 = "0.7"
+aes = "0.8"
+libaes = "0.7"
+indicatif = "0.17.0"
+uuid = { version = "1", features = ["v4"] }
+block-padding = "0.3.3"
+tiny_http = "0.12"
+
