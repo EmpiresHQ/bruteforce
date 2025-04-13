@@ -236,7 +236,7 @@ pub fn start_gpu_thread(found: Arc<AtomicBool>) -> Option<(mpsc::Sender<GpuMessa
                         // Ensure GPU writes are visible to CPU
                         std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
                         
-                        // Check results for matches - with safety bounds check
+                        // Check results for matches - with safety bounds check and improved CPU validation
                         let mut found_match = false;
                         {
                             let results_ptr = buffer_results.contents() as *const u32;
@@ -244,17 +244,23 @@ pub fn start_gpu_thread(found: Arc<AtomicBool>) -> Option<(mpsc::Sender<GpuMessa
                             
                             for i in 0..batch_size {
                                 if results_slice[i] == 1 {
-                                    // Found a match, verify on CPU to get the decrypted text
+                                    // Found a potential match, verify on CPU to get the decrypted text
                                     let candidate = start_candidate + i as u128;
                                     let candidate_uuid = candidate_to_uuid(candidate);
                                     let pass_candidate = candidate_uuid.to_string();
                                     let (key, iv) = evp_bytes_to_key(&pass_candidate, &salt);
+                                    
+                                    // Perform thorough validation on CPU
                                     if let Some(decrypted) = decrypt_and_check(&key, &iv, &ciphertext) {
+                                        // Only if the decryption is valid UTF-8 and contains expected patterns
                                         found.store(true, Ordering::Relaxed);
                                         found_match = true;
-                                        println!("GPU found a match!");
+                                        println!("GPU found a match! Valid UUID: {}", candidate_uuid);
                                         let _ = tx_from_gpu.send(GpuResult::Found(candidate, candidate_uuid, decrypted));
                                         break;
+                                    } else {
+                                        // If CPU validation fails, just continue checking other results
+                                        println!("GPU found potential match at UUID: {}, but CPU validation failed", candidate_uuid);
                                     }
                                 }
                             }

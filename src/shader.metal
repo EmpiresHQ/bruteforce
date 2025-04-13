@@ -414,7 +414,7 @@ void aes256_decrypt_block(
 }
 
 // Full AES-CBC decryption for production use
-// Returns true if decryption is valid (proper PKCS#7 padding)
+// Returns true if decryption might be valid (basic validation only)
 bool aes_decrypt_cbc(
     thread const uint8_t* key,       // 32 bytes for AES-256
     thread const uint8_t* iv,        // 16 bytes
@@ -464,66 +464,26 @@ bool aes_decrypt_cbc(
         }
     }
     
-    // Additional validation for application's purpose:
-    // Check if the decrypted content is valid text:
-    // 1. First, check that it begins with ASCII text
-    // 2. Look for common patterns in the challenge text
-    
-    // Assume minimum valid length of plaintext (after removing padding)
+    // Simplified validation - just check if the first part looks like text
+    // Let the CPU do more thorough validation of promising candidates
     uint valid_len = cipher_len - padding_value;
-    if (valid_len < 20) {
-        return false; // Too short to be valid content
-    }
-    
-    // Check for printable ASCII in the first part of the message
-    // Typical ASCII text will be in range 32-126 with some control chars like newline (10)
-    bool has_text_chars = false;
-    bool has_invalid_chars = false;
-    
-    for (uint i = 0; i < min(valid_len, (uint)64); i++) {
-        uint8_t c = plaintext[i];
-        // Check if character is typically found in text files
-        if ((c >= 32 && c <= 126) || c == 10 || c == 13 || c == 9) {
-            has_text_chars = true;
-        } else if (c < 9 || (c > 13 && c < 32) || c > 126) {
-            // Definitely not printable ASCII or common control chars
-            has_invalid_chars = true;
-        }
-    }
-    
-    // Basic heuristic: valid decryption should mostly contain text characters
-    // and few or no invalid bytes in the beginning
-    if (!has_text_chars || has_invalid_chars) {
+    if (valid_len < 10) { // Require at least 10 bytes of content
         return false;
     }
     
-    // Look for common patterns in the text (phrases likely to be in the challenge message)
-    bool found_pattern = false;
+    // Basic test: Check if most chars are in the printable ASCII range
+    int printable_count = 0;
+    int check_bytes = min(64, (int)valid_len);
     
-    // Check for "Congratulations" or similar phrases commonly found in challenge messages
-    const uint8_t pattern1[] = { 'T', 'h' }; // "Th"
-    
-    // Search for patterns in the decrypted text (only search in first ~200 bytes)
-    uint search_len = min(valid_len, (uint)200);
-    
-    // Pattern 1
-    for (uint i = 0; i <= search_len - 7; i++) {
-        bool match = true;
-        for (uint j = 0; j < 7; j++) {
-            if (plaintext[i + j] != pattern1[j]) {
-                match = false;
-                break;
-            }
-        }
-        if (match) {
-            found_pattern = true;
-            break;
+    for (int i = 0; i < check_bytes; i++) {
+        uint8_t c = plaintext[i];
+        if ((c >= 32 && c <= 126) || c == 10 || c == 13 || c == 9) {
+            printable_count++;
         }
     }
     
-    // Return success if the content looks valid
-    // Either we found a known pattern or we have enough text structure
-    return found_pattern;
+    // If at least 75% of the characters are printable, consider it a potential match
+    return (printable_count >= check_bytes * 0.75);
 }
 
 kernel void decryptAndCheck(

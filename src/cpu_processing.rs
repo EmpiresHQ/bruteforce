@@ -2,10 +2,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use uuid::Uuid;
 use libaes::Cipher;
 use md5;
 use rayon::prelude::*;
+use uuid::Uuid;
 
 /// Convert a candidate value (from a 122‑bit space) into a valid UUID‑v4.
 pub fn candidate_to_uuid(random_part: u128) -> Uuid {
@@ -80,13 +80,13 @@ pub fn evp_bytes_to_key(pass: &str, salt: &[u8]) -> ([u8; 32], [u8; 16]) {
         prev = digest.0.to_vec();
         data.extend_from_slice(&prev);
     }
-    
+
     let mut key = [0u8; 32];
     let mut iv = [0u8; 16];
-    
+
     key.copy_from_slice(&data[..32]);
     iv.copy_from_slice(&data[32..48]);
-    
+
     (key, iv)
 }
 
@@ -94,20 +94,26 @@ pub fn evp_bytes_to_key(pass: &str, salt: &[u8]) -> ([u8; 32], [u8; 16]) {
 pub fn decrypt_and_check(key: &[u8; 32], iv: &[u8; 16], ciphertext: &[u8]) -> Option<String> {
     // Create a new AES-256 cipher instance
     let cipher = Cipher::new_256(key);
+
     // Try to decrypt
     let plain_bytes = cipher.cbc_decrypt(iv, ciphertext);
-    // Define byte patterns to search for
-    let flag_pattern = b"flag{";
-    let challenge_pattern = b"challenge";
-    // Check if the decrypted bytes contain the patterns
-    if plain_bytes.windows(flag_pattern.len()).any(|window| window == flag_pattern) || 
-       plain_bytes.windows(challenge_pattern.len()).any(|window| window == challenge_pattern) {
-        // Only convert to UTF-8 string if pattern is found
-        if let Ok(plain_text) = String::from_utf8(plain_bytes) {
+
+    // First check: is this valid UTF-8?
+    if let Ok(plain_text) = String::from_utf8(plain_bytes.clone()) {
+        // Second check: Does it look like the content we expect?
+        // Define patterns to search for - anything that might be in the solution
+
+        // Check if any pattern is found
+        if plain_text.to_lowercase().contains("Th") {
+            return Some(plain_text);
+        }
+
+        // Additional check: if it's valid text with multiple lines, it might be our target
+        if plain_text.lines().count() > 3 && plain_text.len() > 50 {
             return Some(plain_text);
         }
     }
-    
+
     None
 }
 
@@ -122,48 +128,49 @@ pub fn process_cpu_range(
     last_checked: Arc<Mutex<String>>,
     found: Arc<AtomicBool>,
     result_uuid: Arc<Mutex<Option<(u128, Uuid, String)>>>,
-    start_time: Instant
+    start_time: Instant,
 ) {
-    (start..end)
-        .into_par_iter()
-        .for_each(|cand| {
-            if found.load(Ordering::Relaxed) {
-                return;
-            }
-            
-            // Update the CPU position occasionally
-            if cand % 10000 == 0 {
-                let mut pos = cpu_position.lock().unwrap();
-                *pos = cand;
-            }
-            
-            let candidate_uuid = candidate_to_uuid(cand);
-            let pass_candidate = candidate_uuid.to_string();
-            
-            if cand % 1000 == 0 {
-                let mut last = last_checked.lock().unwrap();
-                *last = pass_candidate.clone();
-            }
-            
-            // Increment the counter BEFORE performing the expensive operations
-            // This ensures we count exactly one operation per iteration
-            counter.fetch_add(1, Ordering::Relaxed);
-            
-            let (key, iv) = evp_bytes_to_key(&pass_candidate, salt);
-            
-            if let Some(decrypted) = decrypt_and_check(&key, &iv, ciphertext) {
-                let num_threads = rayon::current_num_threads();
-                // Use the counter value directly for ops calculation
-                let total_ops = counter.load(Ordering::Relaxed);
-                let ops_per_sec = (total_ops as f64 / start_time.elapsed().as_secs_f64()).ceil() as u64;
-                
-                println!("\nSolution found!");
-                println!("Candidate UUID: {}", pass_candidate);
-                println!("Speed: {} ops/sec with {} threads", ops_per_sec, num_threads);
-                
-                found.store(true, Ordering::Relaxed);
-                let mut res = result_uuid.lock().unwrap();
-                *res = Some((cand, candidate_uuid, decrypted));
-            }
-        });
+    (start..end).into_par_iter().for_each(|cand| {
+        if found.load(Ordering::Relaxed) {
+            return;
+        }
+
+        // Update the CPU position occasionally
+        if cand % 10000 == 0 {
+            let mut pos = cpu_position.lock().unwrap();
+            *pos = cand;
+        }
+
+        let candidate_uuid = candidate_to_uuid(cand);
+        let pass_candidate = candidate_uuid.to_string();
+
+        if cand % 1000 == 0 {
+            let mut last = last_checked.lock().unwrap();
+            *last = pass_candidate.clone();
+        }
+
+        // Increment the counter BEFORE performing the expensive operations
+        // This ensures we count exactly one operation per iteration
+        counter.fetch_add(1, Ordering::Relaxed);
+
+        let (key, iv) = evp_bytes_to_key(&pass_candidate, salt);
+
+        if let Some(decrypted) = decrypt_and_check(&key, &iv, ciphertext) {
+            let num_threads = rayon::current_num_threads();
+            // Use the counter value directly for ops calculation
+            let total_ops = counter.load(Ordering::Relaxed);
+            let ops_per_sec = (total_ops as f64 / start_time.elapsed().as_secs_f64()).ceil() as u64;
+
+            println!("\nSolution found!");
+            println!("Candidate UUID: {}", pass_candidate);
+            println!(
+                "Speed: {} ops/sec with {} threads",
+                ops_per_sec, num_threads
+            );
+
+            found.store(true, Ordering::Relaxed);
+            let mut res = result_uuid.lock().unwrap();
+            *res = Some((cand, candidate_uuid, decrypted));
+        }
+    });
 }
