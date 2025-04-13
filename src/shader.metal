@@ -495,6 +495,14 @@ kernel void decryptAndCheck(
     constant uint& length [[buffer(5)]],            // Ciphertext length
     uint id [[thread_position_in_grid]]
 ) {
+    // Set default result to failure
+    results[id] = 0;
+    
+    // Safety check to prevent buffer overflow
+    if (length > 1024) {
+        return;
+    }
+    
     // Copy key and IV to thread memory
     uint8_t key[32]; // AES-256 key size
     uint8_t iv[16];  // AES IV size
@@ -507,8 +515,8 @@ kernel void decryptAndCheck(
         iv[i] = ivs[id * 16 + i];
     }
     
-    // Create buffer for decryption output
-    uint8_t plaintext[1024]; // Assuming max ciphertext size
+    // Create buffer for decryption output - ensure it's properly sized
+    uint8_t plaintext[1024]; // Buffer for decrypted output
     
     // Copy ciphertext to thread memory (required for address space compatibility)
     uint8_t local_ciphertext[1024]; // Temporary buffer for ciphertext
@@ -517,7 +525,6 @@ kernel void decryptAndCheck(
     }
     
     // Attempt decryption with full production-ready implementation
-    // Use local_ciphertext (thread address space) instead of ciphertext (device address space)
     bool success = aes_decrypt_cbc(key, iv, local_ciphertext, length, plaintext);
     
     // Set result based on decryption success
