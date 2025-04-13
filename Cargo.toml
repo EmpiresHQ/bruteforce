@@ -12,4 +12,9 @@ indicatif = "0.17.0"
 uuid = { version = "1", features = ["v4"] }
 block-padding = "0.3.3"
 tiny_http = "0.12"
+metal = "0.24.0"
+objc = "0.2.7"
+cocoa = "0.24.1"
+core-foundation = "0.9.3"
+chrono = "0.4" # Added for savepoint timestamp formatting
 
