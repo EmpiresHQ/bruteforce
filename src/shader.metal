@@ -501,9 +501,7 @@ bool aes_decrypt_cbc(
     bool found_pattern = false;
     
     // Check for "Congratulations" or similar phrases commonly found in challenge messages
-    const uint8_t pattern1[] = { 'C', 'o', 'n', 'g', 'r', 'a', 't' }; // "Congrat"
-    const uint8_t pattern2[] = { 'c', 'h', 'a', 'l', 'l', 'e', 'n', 'g', 'e' }; // "challenge"
-    const uint8_t pattern3[] = { 'S', 'u', 'c', 'c', 'e', 's', 's' }; // "Success"
+    const uint8_t pattern1[] = { 'T', 'h' }; // "Th"
     
     // Search for patterns in the decrypted text (only search in first ~200 bytes)
     uint search_len = min(valid_len, (uint)200);
@@ -523,39 +521,6 @@ bool aes_decrypt_cbc(
         }
     }
     
-    // Pattern 2
-    if (!found_pattern) {
-        for (uint i = 0; i <= search_len - 9; i++) {
-            bool match = true;
-            for (uint j = 0; j < 9; j++) {
-                if (plaintext[i + j] != pattern2[j]) {
-                    match = false;
-                    break;
-                }
-            }
-            if (match) {
-                found_pattern = true;
-                break;
-            }
-        }
-    }
-    
-    // Pattern 3
-    if (!found_pattern) {
-        for (uint i = 0; i <= search_len - 7; i++) {
-            bool match = true;
-            for (uint j = 0; j < 7; j++) {
-                if (plaintext[i + j] != pattern3[j]) {
-                    match = false;
-                    break;
-                }
-            }
-            if (match) {
-                found_pattern = true;
-                break;
-            }
-        }
-    }
     
     // Count several consecutive valid paragraphs as additional validation
     // Look for multiple newline patterns which indicate text paragraphs
